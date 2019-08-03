@@ -5,10 +5,11 @@ from nbt import nbt
 from PIL import Image
 from PIL.ImagePalette import ImagePalette
 from collections import defaultdict
+import colors
 
 map_id_re = re.compile(r"^map_(\d+)$")
 
-SIDE_LEN = [ 2 ** (7+i) for i in range(0, 5)]
+SIDE_LEN = [2 ** (7+i) for i in range(0, 5)]
 
 
 class Direction(Enum):
@@ -17,18 +18,46 @@ class Direction(Enum):
     SW = 2
     SE = 3
 
-
+CROP_COORDS = {
+    Direction.NW: (0, 0, 64, 64),
+    Direction.NE: (0, 64, 64, 128),
+    Direction.SW: (64, 0, 128, 64),
+    Direction.SE: (64, 64, 128, 128),
+}
 
 
 class MinecraftPalette(ImagePalette):
-    palette_1_12 = [
-        0,0,0,0,0,0,0,0,0,0,0,0,90,126,40,110,154,48,127,178,56,67,94,30,174,164,115,213,201,141,247,233,163,131,123,86,140,140,140,172,172,172,199,199,199,105,105,105,180,0,0,220,0,0,255,0,0,135,0,0,113,113,180,138,138,220,160,160,255,85,85,135,118,118,118,144,144,144,167,167,167,88,88,88,0,88,0,0,107,0,0,124,0,0,66,0,180,180,180,220,220,220,255,255,255,135,135,135,116,119,130,141,145,159,164,168,184,87,89,97,107,77,54,130,94,66,151,109,77,80,58,41,79,79,79,97,97,97,112,112,112,59,59,59,45,45,180,55,55,220,64,64,255,34,34,135,101,84,51,123,103,62,143,119,72,76,63,38,180,178,173,220,217,211,255,252,245,135,133,130,152,90,36,186,110,44,216,127,51,114,67,27,126,54,152,154,66,186,178,76,216,94,40,114,72,108,152,88,132,186,102,153,216,54,81,114,162,162,36,198,198,44,229,229,51,121,121,27,90,144,18,110,176,22,127,204,25,67,108,13,171,90,116,209,110,142,242,127,165,128,67,87,54,54,54,66,66,66,76,76,76,40,40,40,108,108,108,132,132,132,153,153,153,81,81,81,54,90,108,66,110,132,76,127,153,40,67,81,90,44,126,110,54,154,127,63,178,67,33,94,36,54,126,44,66,154,51,76,178,27,40,94,72,54,36,88,66,44,102,76,51,54,40,27,72,90,36,88,110,44,102,127,51,54,67,27,108,36,36,132,44,44,153,51,51,81,27,27,18,18,18,22,22,22,25,25,25,13,13,13,176,168,54,216,205,66,250,238,77,132,126,41,65,155,150,79,189,184,92,219,213,49,116,113,52,90,180,64,110,220,74,128,255,39,68,135,0,153,41,0,187,50,0,217,58,0,115,31,91,61,35,111,74,42,129,86,49,68,46,26,79,1,0,97,2,0,112,2,0,59,1,0,    ]
-
     def __init__(self):
-        super().__init__("RGB",self.palette_1_12,len(self.palette_1_12))
+        p = colors.FULL_RGBA_PALETTE
+        super().__init__("RGBA", p, len(p))
 
+class AbstractMap:
+    @property
+    def rect(self):
+        side = SIDE_LEN[self.scale]
+        x, z = self.center
+        l = x - side // 2
+        t = z - side // 2
+        b = t + side
+        r = l + side
+        return (l, t, r, b)
 
-class Map:
+    def get_megaregion_coords(self):
+        return self.get_coords(4)
+
+    def get_coords(self, scale):
+        r = tuple(c // (SIDE_LEN[scale]) for c in self.center)
+        print(self.center, r)
+        return tuple(c // (SIDE_LEN[scale]) for c in self.center)
+
+    def direction_from(self, other_center):
+        x, z = self.center
+        x_from, z_from = other_center
+        ns = 0 if x_from > x else 2
+        we = 0 if z_from > z else 1
+        return Direction(ns + we)
+
+class Map(AbstractMap):
     def __init__(self, filename):
         stem = PurePath(filename).stem
         m = map_id_re.match(stem)
@@ -40,58 +69,98 @@ class Map:
     def extract_image(self):
         colors = bytes(self.nbtfile["data"]["colors"].value)
         result = Image.frombytes("P", (128, 128), colors)
-        result.putpalette(MinecraftPalette().tobytes())
+        alpha_layer = bytes(bytearray(map(lambda b: 0x00 if b == 0x00 else 0xff ,colors)))
+        alpha = Image.frombytes("L", (128, 128), alpha_layer)
+        result.im.putpalette(*MinecraftPalette().getdata())
+        result = result.convert("RGB")
+        result.putalpha(alpha)
         return result
-
-    @property
-    def rect(self):
-        side = SIDE_LEN[self.scale]
-        x, z = self.center
-        l = x - side // 2
-        t = z - side // 2
-        b = t + side
-        r = l + side
-        return (l, t, r, b)
-    
-    def get_megaregion_coords(self):
-        return self.get_coords(4)
-
-    def get_coords(self, scale):
-        return tuple(c // (SIDE_LEN[scale]) for c in self.center)
-
-    def direction_from(self, other_center):
-        x, z = self.center
-        x_from, z_from = other_center
-        ns = 0 if x_from > x else 2
-        we = 0 if z_from > z else 1
-        return Direction(ns + we)
    
     def __repr__(self):
         return "Map(id={}, scale={}, center={}, coords={})".format(self.id, self.scale, self.center, self.get_coords(self.scale))
+
+
+class MapView(AbstractMap):
+    def __init__(self, center, scale, parent):
+        self.center = center
+        self.scale = scale
+        self.parent = parent
+    
+    def extract_image(self):
+        parent_image = self.parent.extract_image()
+        direction = self.direction_from(self.parent.center)
+        result = parent_image.crop(CROP_COORDS[direction]).resize((128,128),Image.NEAREST)
+        # result.show()
+        return result
+
+    @classmethod
+    def from_direction(cls, direction, parent):
+        return cls(sub_center(direction, parent.center, parent.scale), parent.scale - 1, parent)
+
+
+class MapStack(AbstractMap):
+    def __init__(self, center, scale):
+        self.center = center
+        self.scale = scale
+        self.stack = []
+        
+    def extract_image(self):
+        result = Image.new("RGBA", (128, 128), (0,0,0,0))
+        images = (m.extract_image() for m in self.stack)
+        for im in images:
+            result.alpha_composite(im)
+        return result
+
+    def add(self, elt):
+        print(self.scale, elt.scale)
+        print(self.center, elt.center)
+        # assert self.center == elt.center
+        assert self.scale == elt.scale
+        self.stack.append(elt)
+
+    def __repr__(self):
+        return "MapStack(stack<{}>)".format(self.stack)  
 
 
 class MapTree:
     def __init__(self, center, scale):
         self.center = center
         self.scale = scale
-        self.elt = None
+        self.stack = MapStack(center, scale)
         if scale > 0:
             self.children = {}
         else:
-            self.children = {}
+            self.children = None
 
     def add(self, elt):
         if self.scale == elt.scale:
-            self.elt = elt
+            self.stack.add(elt)
         elif self.scale > elt.scale:
             d = elt.direction_from(self.center)
-            self.children[d] = MapTree(sub_center(d, self.center, self.scale), self.scale - 1)
+            if d not in self.children:
+                self.children[d] = MapTree(sub_center(d, self.center, self.scale), self.scale - 1)
             self.children[d].add(elt)
         else:
             raise Exception("how we got here?")
 
+    def interpolate(self):
+        if self.children is None:
+            return
+        for d in Direction:
+            # print(d)
+            child_center = sub_center(d, self.center, self.scale)
+            if d not in self.children:
+                self.children[d] = MapTree(child_center, self.scale - 1)
+            self.children[d].add(MapView.from_direction(d, self.stack))
+            self.children[d].interpolate()
+
+
+
+
     def __repr__(self):
-        return "MapTree({!r}, children<{}>)".format(self.elt, list(self.children.items()))
+        if self.children is None:
+            return "MapTree({!r})".format(self.stack)
+        return "MapTree({!r}, \nchildren<{}>)".format(self.stack, list(self.children.items()))  
 
 
 class Atlas():
@@ -103,7 +172,8 @@ class Atlas():
         self.megaregions = {}
 
     def add(self, m):
-        self.megaregions[m.get_megaregion_coords()] = MapTree(m.get_megaregion_coords(), 4)
+        if m.get_megaregion_coords() not in self.megaregions:
+            self.megaregions[m.get_megaregion_coords()] = MapTree(m.center, 4)
         self.megaregions[m.get_megaregion_coords()].add(m)
 
     def update(self, *maps):
@@ -123,13 +193,16 @@ class Atlas():
         queue = list(self.megaregions.values())
         while len(queue) != 0:
             mt = queue.pop()
-            if mt.elt:
-                result[mt.scale].append(mt.elt)
-            print(list(mt.children.values()))
-            queue.extend(list(mt.children.values()))
+            if mt.stack:
+                result[mt.scale].append(mt.stack)
+            # print(list(mt.children.values()))
+            if mt.children is not None:
+                queue.extend(list(mt.children.values()))
         return result
 
-        
+    def interpolate(self):
+        for mt in self.megaregions.values():
+            mt.interpolate()
 
     def __repr__(self):
         return "Atlas(dim=<{}>)".format(self.get_dimension())
@@ -141,14 +214,14 @@ def load_maps(paths):
 
 def sub_center(direction, center, scale):
     x, z = center
-    o = SIDE_LEN[scale] // 2
-    if Direction.NW:
+    o = SIDE_LEN[scale] // 4
+    if direction == Direction.NW:
         return (x - o, z - o)
-    elif Direction.NE:
+    elif direction == Direction.NE:
         return (x - o, z + o)
-    elif Direction.SW:
+    elif direction == Direction.SW:
         return (x + o, z - o)
-    elif Direction.SE:
+    elif direction == Direction.SE:
         return (x + o, z + o)
 
 
