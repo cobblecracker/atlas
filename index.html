@@ -1,9 +1,9 @@
 <html>  
   <head>
-    <title>David's Map</title>
+    <title>Atlas</title>
+    <link rel="shortcut icon" href="/favicon.png"> 
     <link rel="stylesheet" href="http://cdn.leafletjs.com/leaflet/v1.5.1/leaflet.css">
     <script src="http://cdn.leafletjs.com/leaflet/v1.5.1/leaflet.js"></script>
-    <!-- <script src="L.SimpleGraticule.js"></script> -->
     <meta charset="utf-8">
     <style>
       #map {
@@ -23,7 +23,6 @@
 
 var map = L.map('map', {
     crs: L.CRS.Simple,
-
     minZoom: 0,
     maxZoom: 4
 });
@@ -34,13 +33,35 @@ var cartodbAttribution = '&copy; <a href="https://www.openstreetmap.org/copyrigh
 //     attribution: cartodbAttribution
 // }).addTo(map);
 
-var mcmap = L.tileLayer('http://localhost:8000/byzoom2/{z}/{x}/{y}.png', {
+var mcmap = L.tileLayer('http://localhost:8000/atlas/world/{z}/{x}/{y}.png', {
   tileSize: 256
       // bounds: [[-2048, -2048], [2048, 2048]]
     }).addTo(map);
 // map.fitBounds([[-2048, -2048], [2048, 2048]]);
 
 map.setView([0, 0], 0);
+
+var BannerIcon = L.Icon.extend({
+    options: {
+        iconUrl: 'black.png',
+        iconSize:     [16, 16],
+        shadowSize:   [0, 0],
+        iconAnchor:   [8, 16],
+        shadowAnchor: [0, 0],
+        popupAnchor:  [-3, -76]
+    }
+});
+
+var blackBanner = new BannerIcon()
+
+fetch("banners.json")
+  .then(response => response.json())
+  .then(banners => banners.map(
+    b => L.marker(map.unproject([-b.x - 64, -b.z - 64]), {icon: blackBanner}).addTo(map))
+  );
+
+// var marker = L.marker([-64, 64]).addTo(map);
+
     </script>
   </body>
 </html>

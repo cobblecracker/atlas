@@ -80,6 +80,19 @@ class Bounds:
         return (l, t, r, b)
 
 
+@dataclass(frozen=True)
+class Banner:
+    x: int
+    y: int
+    z: int
+    color: str
+    name: str
+
+    @classmethod
+    def from_nbt(cls, nbt):
+        name = nbt["Name"].value if "Name" in nbt else None
+        return cls(nbt["Pos"]["X"].value, nbt["Pos"]["Y"].value, nbt["Pos"]["Z"].value, nbt["Color"].value, name)
+
 CROP_COORDS = {
     Direction.NW: (0, 0, 64, 64),
     Direction.NE: (0, 64, 64, 128),
@@ -94,31 +107,7 @@ class MinecraftPalette(ImagePalette):
         super().__init__("RGBA", p, len(p))
 
 
-class AbstractMap:
-    @property
-    def rect(self):
-        side = SIDE_LEN[self.scale]
-        x, z = self.center
-        l = x - side // 2
-        t = z - side // 2
-        b = t + side
-        r = l + side
-        return (l, t, r, b)
-
-    def get_coords(self, scale):
-        r = tuple(c // (SIDE_LEN[scale]) for c in self.center)
-        print(self.center, r)
-        return tuple(c // (SIDE_LEN[scale]) for c in self.center)
-
-    def direction_from(self, other_center):
-        x, z = self.center
-        x_from, z_from = other_center
-        ns = 0 if x_from > x else 2
-        we = 0 if z_from > z else 1
-        return Direction(ns + we)
-
-
-class Map(AbstractMap):
+class Map:
     def __init__(self, filename):
         stem = PurePath(filename).stem
         m = map_id_re.match(stem)
@@ -129,6 +118,12 @@ class Map(AbstractMap):
             int(self.nbtfile["data"]["zCenter"].value),
             int(self.nbtfile["data"]["scale"].value),
         )
+
+        self.banners = set(
+            Banner.from_nbt(b) for b in self.nbtfile["data"]["banners"]
+        )
+        
+
 
     def get_image(self):
         colors = bytes(self.nbtfile["data"]["colors"].value)
@@ -146,7 +141,7 @@ class Map(AbstractMap):
         return "Map(id={}, bounds={})".format(self.id, self.bounds)
 
 
-class MapView(AbstractMap):
+class MapView:
     def __init__(self, bounds, parent):
         self.bounds = bounds
         self.parent = parent
@@ -167,7 +162,7 @@ class MapView(AbstractMap):
         )
 
 
-class MapStack(AbstractMap):
+class MapStack:
     def __init__(self, bounds):
         self.bounds = bounds
         self.stack = []
@@ -241,16 +236,17 @@ class Atlas:
 
     def __init__(self):
         self.megaregions = {}
+        self.banners = set()
 
     def add(self, m):
-        print(m)
+        self.banners |= m.banners
         if m.bounds.get_coords(4) not in self.megaregions:
             self.megaregions[m.bounds.get_coords(4)] = MapTree(
                 m.bounds.containing_bounds(4)
             )
         self.megaregions[m.bounds.get_coords(4)].add(m)
 
-    def update(self, *maps):
+    def update(self, maps):
         for m in maps:
             self.add(m)
 
